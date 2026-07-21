@@ -12,7 +12,7 @@
     --paper:#ece8df;
     --ink:#e8e6e0;
     --dim:#8b8a86;
-    --cut:#e34a27; /* craft-knife red */
+    --cut:#e34a27;
     --mono:"SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   }
   *{box-sizing:border-box; margin:0; padding:0;}
@@ -36,7 +36,6 @@
 
   main{flex:1; display:flex; min-height:0;}
 
-  /* stage */
   .stage{
     flex:1; display:flex; align-items:center; justify-content:center;
     padding:26px; min-width:0; position:relative;
@@ -59,7 +58,6 @@
   }
   .empty b{color:var(--ink);}
 
-  /* rail */
   aside{
     flex:0 0 292px; border-left:1px solid var(--line);
     background:var(--panel); overflow-y:auto; padding-bottom:20px;
@@ -109,6 +107,8 @@
   button.act:hover{border-color:var(--dim);}
   button.primary{border-color:var(--cut); color:var(--cut);}
   button.primary:hover{background:var(--cut); color:#141416;}
+  button.act:disabled{opacity:.4; cursor:default;}
+  button.act.rec{border-color:var(--cut); color:#141416; background:var(--cut);}
   #file{display:none;}
   .hint{color:var(--dim); font-size:10px; line-height:1.7; margin-top:8px;}
   @media (max-width:760px){
@@ -183,12 +183,26 @@
     </div>
 
     <div class="sec">
+      <h2>Motion</h2>
+      <div class="row"><label for="motion">amount</label><input type="range" id="motion" min="0" max="100" value="45"><output id="motionV">45</output></div>
+      <div class="row"><label for="dur">loop&nbsp;(s)</label><input type="range" id="dur" min="2" max="12" value="5"><output id="durV">5</output></div>
+      <div class="row"><label for="waveN">wave</label><input type="range" id="waveN" min="0" max="100" value="30"><output id="waveNV">30</output></div>
+      <div class="btns">
+        <button class="act" id="play">Play</button>
+      </div>
+      <div class="hint">Every fragment breathes on a sine cycle, so the loop is perfectly seamless. Wave sweeps the motion across strips left to right.</div>
+    </div>
+
+    <div class="sec">
       <h2>Print</h2>
       <div class="btns">
         <button class="act" id="recut">Re-cut</button>
-        <button class="act primary" id="save">Export PNG</button>
+        <button class="act primary" id="save">PNG</button>
       </div>
-      <div class="hint">Re-cut reshuffles the random pattern. Export renders at full source resolution.</div>
+      <div class="btns" style="margin-top:8px">
+        <button class="act primary" id="saveVid">Export video loop</button>
+      </div>
+      <div class="hint" id="vidHint">Records exactly one loop as WebM at 60&nbsp;fps. For MP4/Instagram: ffmpeg -i loop.webm -c:v libx264 -pix_fmt yuv420p loop.mp4</div>
     </div>
   </aside>
 </main>
@@ -203,11 +217,13 @@ const S = {
   seed: 1234,
   count: 28, shift: 30, gap: 12, jitter: 35,
   contrast: 115, bright: 102, mono: true, bg: "#ece8df",
+  motion: 45, dur: 5, wave: 30,
+  playing: false,
 };
 
+const TAU = Math.PI * 2;
 const view = document.getElementById("view");
-const vctx = view.getContext("2d");
-const src = document.createElement("canvas");   // toned source
+const src = document.createElement("canvas");
 const sctx = src.getContext("2d");
 
 /* seeded rng (mulberry32) */
@@ -221,9 +237,22 @@ function rng(seed){
   };
 }
 
+/* ---------- motion helper ----------
+   t: loop phase 0..1 (null = static frame)
+   Each fragment gets a random phase; the wave control adds a phase
+   gradient across x so motion travels through the image. Integer
+   cycle counts keep the loop seamless. */
+function osc(t, r, xNorm, cyclesPick){
+  const phase = r();                       // consumed even when static, keeps rng aligned
+  const cycles = cyclesPick ? (r() < 0.5 ? 1 : 2) : (r(), 1);
+  if (t === null) return 0;
+  const wavePhase = xNorm * (S.wave / 100) * 2;
+  return Math.sin(TAU * (t * cycles + phase + wavePhase));
+}
+
 /* ---------- tone pass ---------- */
 function buildSource(w, h){
-  src.width = w; src.height = h;
+  if (src.width !== w || src.height !== h){ src.width = w; src.height = h; }
   sctx.filter =
     (S.mono ? "grayscale(1) " : "") +
     `contrast(${S.contrast}%) brightness(${S.bright}%)`;
@@ -232,29 +261,31 @@ function buildSource(w, h){
 }
 
 /* ---------- effects ----------
-   each: (ctx, W, H, r, p) — draws from `src` (already W×H) */
+   each: (ctx, W, H, r, p, t) — t is loop phase or null */
 
-function fxSlice(ctx, W, H, r, p){
+function fxSlice(ctx, W, H, r, p, t){
   const n = p.count, w = W / n;
   const maxDy = p.shift / 100 * H * 0.28;
   const g = p.gap / 100 * w * 0.9;
+  const amp = p.motion / 100 * H * 0.12;
   for (let i = 0; i < n; i++){
-    const dy = (r() - 0.5) * 2 * maxDy * (0.4 + 0.6 * r());
+    const base = (r() - 0.5) * 2 * maxDy * (0.4 + 0.6 * r());
+    const dy = base + amp * osc(t, r, i / n, true);
     const sx = i * w;
     ctx.drawImage(src, sx, 0, w, H, sx + g/2, dy, w - g, H);
   }
 }
 
-function fxMirror(ctx, W, H, r, p){
+function fxMirror(ctx, W, H, r, p, t){
   const n = p.count, w = W / n;
   const maxDy = p.shift / 100 * H * 0.15;
   const g = p.gap / 100 * w * 0.9;
   const prob = 0.25 + p.jitter / 100 * 0.5;
+  const amp = p.motion / 100 * H * 0.09;
   for (let i = 0; i < n; i++){
     const dx = i * w + g/2, dw = w - g;
-    const dy = (r() - 0.5) * 2 * maxDy;
+    const dy = (r() - 0.5) * 2 * maxDy + amp * osc(t, r, i / n, true);
     if (r() < prob){
-      // sample the horizontally mirrored position, drawn flipped
       const sx = W - (i + 1) * w;
       ctx.save();
       ctx.translate(dx + dw, 0); ctx.scale(-1, 1);
@@ -266,29 +297,33 @@ function fxMirror(ctx, W, H, r, p){
   }
 }
 
-function fxEcho(ctx, W, H, r, p){
+function fxEcho(ctx, W, H, r, p, t){
   const n = p.count, w = W / n;
   const maxDy = p.shift / 100 * H * 0.18;
   const g = p.gap / 100 * w * 0.9;
-  const jx = p.jitter / 100 * W * 0.22;   // horizontal source displacement
+  const jx = p.jitter / 100 * W * 0.22;
+  const ampX = p.motion / 100 * W * 0.06;   // features slide sideways
+  const ampY = p.motion / 100 * H * 0.05;
   for (let i = 0; i < n; i++){
-    let sx = i * w + (r() - 0.5) * 2 * jx;
+    let sx = i * w + (r() - 0.5) * 2 * jx + ampX * osc(t, r, i / n, false);
     sx = Math.max(0, Math.min(W - w, sx));
-    const dy = (r() - 0.5) * 2 * maxDy;
+    const dy = (r() - 0.5) * 2 * maxDy + ampY * osc(t, r, i / n, true);
     ctx.drawImage(src, sx, 0, w, H, i * w + g/2, dy, w - g, H);
   }
 }
 
-function fxWeave(ctx, W, H, r, p){
+function fxWeave(ctx, W, H, r, p, t){
   const n = Math.max(6, Math.round(p.count * 0.8));
-  const cw = W / n, rh = cw;                 // square-ish cells
+  const cw = W / n, rh = cw;
   const rows = Math.ceil(H / rh);
   const g = p.gap / 100 * cw * 0.5;
   const j = p.jitter / 100 * cw * 0.25;
-  // second layer: flipped source
-  const b = document.createElement("canvas");
-  b.width = W; b.height = H;
+  const amp = p.motion / 100 * cw * 0.35;   // cells breathe in small circles
+  const b = fxWeave._b || (fxWeave._b = document.createElement("canvas"));
+  if (b.width !== W || b.height !== H){ b.width = W; b.height = H; }
   const bx = b.getContext("2d");
+  bx.setTransform(1,0,0,1,0,0);
+  bx.clearRect(0,0,W,H);
   bx.translate(W, 0); bx.scale(-1, 1);
   bx.drawImage(src, 0, 0);
   for (let row = 0; row < rows; row++){
@@ -296,9 +331,12 @@ function fxWeave(ctx, W, H, r, p){
       const over = (row + col) % 2 === 0;
       const layer = over ? src : b;
       const x = col * cw, y = row * rh;
-      const dx = (r() - 0.5) * 2 * j, dy = (r() - 0.5) * 2 * j;
+      const ph = r();
+      const ang = t === null ? 0 : TAU * (t + ph + col / n * (S.wave / 100));
+      const mdx = t === null ? 0 : amp * Math.cos(ang);
+      const mdy = t === null ? 0 : amp * Math.sin(ang);
+      const dx = (r() - 0.5) * 2 * j + mdx, dy = (r() - 0.5) * 2 * j + mdy;
       ctx.drawImage(layer, x, y, cw, rh, x + dx + g/2, y + dy + g/2, cw - g, rh - g);
-      // paper-strip shading: darken the "under" cells slightly
       if (!over){
         ctx.fillStyle = "rgba(0,0,0,0.10)";
         ctx.fillRect(x + dx + g/2, y + dy + g/2, cw - g, rh - g);
@@ -307,44 +345,51 @@ function fxWeave(ctx, W, H, r, p){
   }
 }
 
-function fxMosaic(ctx, W, H, r, p){
+function fxMosaic(ctx, W, H, r, p, t){
   const n = Math.max(8, Math.round(p.count * 0.9));
-  const t = W / n;
-  const rows = Math.ceil(H / t);
-  const g = p.gap / 100 * t * 0.7;
-  const j = p.jitter / 100 * t * 0.5;
-  const rot = p.shift / 100 * 0.16;          // radians max
+  const tl = W / n;
+  const rows = Math.ceil(H / tl);
+  const g = p.gap / 100 * tl * 0.7;
+  const j = p.jitter / 100 * tl * 0.5;
+  const rot = p.shift / 100 * 0.16;
+  const ampR = p.motion / 100 * 0.10;       // tiles rock
+  const ampP = p.motion / 100 * tl * 0.25;  // and drift
   for (let row = 0; row < rows; row++){
     for (let col = 0; col < n; col++){
-      const x = col * t, y = row * t;
-      const cx = x + t/2 + (r() - 0.5) * 2 * j;
-      const cy = y + t/2 + (r() - 0.5) * 2 * j;
+      const x = col * tl, y = row * tl;
+      const o1 = osc(t, r, col / n, false);
+      const o2 = osc(t, r, row / rows, false);
+      const cx = x + tl/2 + (r() - 0.5) * 2 * j + ampP * o1;
+      const cy = y + tl/2 + (r() - 0.5) * 2 * j + ampP * o2;
       ctx.save();
       ctx.translate(cx, cy);
-      ctx.rotate((r() - 0.5) * 2 * rot);
-      ctx.drawImage(src, x, y, t, t, -t/2 + g/2, -t/2 + g/2, t - g, t - g);
+      ctx.rotate((r() - 0.5) * 2 * rot + ampR * o1);
+      ctx.drawImage(src, x, y, tl, tl, -tl/2 + g/2, -tl/2 + g/2, tl - g, tl - g);
       ctx.restore();
     }
   }
 }
 
-function fxBars(ctx, W, H, r, p){
+function fxBars(ctx, W, H, r, p, t){
   const n = p.count;
   const baseW = W / n;
   const maxDy = p.shift / 100 * H * 0.35;
   const gapPx = p.gap / 100 * baseW * 1.4;
   const skipProb = p.jitter / 100 * 0.35;
+  const amp = p.motion / 100 * H * 0.10;
   ctx.shadowColor = "rgba(0,0,0,0.35)";
   ctx.shadowBlur = baseW * 0.35;
   ctx.shadowOffsetY = baseW * 0.12;
   let x = 0;
   while (x < W){
     const w = baseW * (0.5 + r());
-    if (r() > skipProb){
-      const dy = (r() - 0.5) * 2 * maxDy;
-      const sh = H * (0.75 + r() * 0.25);   // some bars shorter
-      const sy = (H - sh) * r();
-      ctx.drawImage(src, x, sy, w, sh, x, sy + dy, w, sh);
+    const skip = r() <= skipProb;
+    const dyStatic = (r() - 0.5) * 2 * maxDy;
+    const sh = H * (0.75 + r() * 0.25);
+    const sy = (H - sh) * r();
+    const o = osc(t, r, x / W, true);
+    if (!skip){
+      ctx.drawImage(src, x, sy, w, sh, x, sy + dyStatic + amp * o, w, sh);
     }
     x += w + gapPx * r();
   }
@@ -355,7 +400,7 @@ const FX = { slice: fxSlice, mirror: fxMirror, echo: fxEcho,
              weave: fxWeave, mosaic: fxMosaic, bars: fxBars };
 
 /* ---------- render ---------- */
-function render(target, scaleCap){
+function render(target, scaleCap, t = null){
   if (!S.img) return;
   const iw = S.img.naturalWidth, ih = S.img.naturalHeight;
   const cap = scaleCap || 1400;
@@ -363,13 +408,41 @@ function render(target, scaleCap){
   const W = Math.round(iw * k), H = Math.round(ih * k);
   buildSource(W, H);
   const c = target || view;
-  c.width = W; c.height = H;
+  if (c.width !== W || c.height !== H){ c.width = W; c.height = H; }
   const ctx = c.getContext("2d");
+  ctx.setTransform(1,0,0,1,0,0);
   ctx.fillStyle = S.bg;
   ctx.fillRect(0, 0, W, H);
   ctx.imageSmoothingQuality = "high";
-  FX[S.effect](ctx, W, H, rng(S.seed), S);
+  FX[S.effect](ctx, W, H, rng(S.seed), S, t);
 }
+
+/* ---------- animation loop ---------- */
+let t0 = performance.now();
+let rafId = null;
+
+function tick(now){
+  const t = ((now - t0) / (S.dur * 1000)) % 1;
+  render(null, null, t);
+  rafId = requestAnimationFrame(tick);
+}
+
+const playBtn = document.getElementById("play");
+function setPlaying(on){
+  S.playing = on;
+  playBtn.textContent = on ? "Pause" : "Play";
+  if (on){
+    t0 = performance.now();
+    rafId = requestAnimationFrame(tick);
+  } else {
+    cancelAnimationFrame(rafId);
+    render();
+  }
+}
+playBtn.addEventListener("click", () => {
+  if (!S.img) return;
+  setPlaying(!S.playing);
+});
 
 /* ---------- io ---------- */
 const stage = document.getElementById("stage");
@@ -409,7 +482,7 @@ document.getElementById("chips").addEventListener("click", e => {
   document.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
   b.classList.add("on");
   S.effect = b.dataset.e;
-  render();
+  if (!S.playing) render();
 });
 
 function bindRange(id, key){
@@ -418,31 +491,89 @@ function bindRange(id, key){
   el.addEventListener("input", () => {
     S[key] = +el.value;
     out.textContent = el.value;
-    render();
+    if (!S.playing) render();
   });
 }
 bindRange("count","count"); bindRange("shift","shift");
 bindRange("gap","gap");     bindRange("jitter","jitter");
 bindRange("contrast","contrast"); bindRange("bright","bright");
+bindRange("motion","motion"); bindRange("dur","dur"); bindRange("waveN","wave");
 
 document.getElementById("mono").addEventListener("change", e => {
-  S.mono = e.target.checked; render();
+  S.mono = e.target.checked; if (!S.playing) render();
 });
 document.getElementById("bgcol").addEventListener("input", e => {
-  S.bg = e.target.value; render();
+  S.bg = e.target.value; if (!S.playing) render();
 });
 document.getElementById("recut").addEventListener("click", () => {
-  S.seed = (Math.random() * 1e9) | 0; render();
+  S.seed = (Math.random() * 1e9) | 0; if (!S.playing) render();
 });
+
+/* ---------- PNG export ---------- */
 document.getElementById("save").addEventListener("click", () => {
   if (!S.img) return;
   const out = document.createElement("canvas");
-  render(out, Math.max(S.img.naturalWidth, S.img.naturalHeight)); // full res
+  render(out, Math.max(S.img.naturalWidth, S.img.naturalHeight));
   const a = document.createElement("a");
   a.download = `boresh-${S.effect}-${S.seed}.png`;
   a.href = out.toDataURL("image/png");
   a.click();
-  render(); // restore preview
+  if (!S.playing) render();
+});
+
+/* ---------- video loop export ----------
+   Records the preview canvas for exactly one loop, starting at
+   phase 0, so the first and last frames match. */
+const vidBtn = document.getElementById("saveVid");
+const vidHint = document.getElementById("vidHint");
+
+vidBtn.addEventListener("click", () => {
+  if (!S.img || vidBtn.classList.contains("rec")) return;
+
+  const wasPlaying = S.playing;
+  if (S.playing) setPlaying(false);
+
+  const mime = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"]
+    .find(m => MediaRecorder.isTypeSupported(m));
+  if (!mime){
+    vidHint.textContent = "MediaRecorder isn't supported in this browser — try Chrome.";
+    return;
+  }
+
+  const fps = 60;
+  const stream = view.captureStream(fps);
+  const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 16_000_000 });
+  const chunks = [];
+  rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  rec.onstop = () => {
+    const blob = new Blob(chunks, { type: "video/webm" });
+    const a = document.createElement("a");
+    a.download = `boresh-${S.effect}-${S.seed}-loop.webm`;
+    a.href = URL.createObjectURL(blob);
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    vidBtn.classList.remove("rec");
+    vidBtn.textContent = "Export video loop";
+    if (wasPlaying) setPlaying(true); else render();
+  };
+
+  vidBtn.classList.add("rec");
+  const durMs = S.dur * 1000;
+  const start = performance.now();
+  rec.start();
+
+  (function frame(now){
+    const el = now - start;
+    if (el >= durMs){
+      render(null, null, 0);      // land exactly on phase 0
+      // give the recorder a beat to capture the final frame
+      setTimeout(() => rec.stop(), 120);
+      return;
+    }
+    vidBtn.textContent = `Recording ${(Math.max(0, durMs - el) / 1000).toFixed(1)}s`;
+    render(null, null, (el / durMs) % 1);
+    requestAnimationFrame(frame);
+  })(start);
 });
 </script>
 </body>
