@@ -162,6 +162,10 @@
         <button class="chip" data-e="mosaic">Mosaic</button>
         <button class="chip" data-e="bars">Bars</button>
       </div>
+      <div class="chips" id="axis" style="grid-template-columns:1fr 1fr; margin-top:6px;">
+        <button class="chip on" data-a="v">Vertical&nbsp;▮▮</button>
+        <button class="chip" data-a="h">Horizontal&nbsp;▬</button>
+      </div>
     </div>
 
     <div class="sec">
@@ -218,6 +222,7 @@ const S = {
   count: 28, shift: 30, gap: 12, jitter: 35,
   contrast: 115, bright: 102, mono: true, bg: "#ece8df",
   motion: 45, dur: 5, wave: 30,
+  axis: "v",
   playing: false,
 };
 
@@ -251,13 +256,24 @@ function osc(t, r, xNorm, cyclesPick){
 }
 
 /* ---------- tone pass ---------- */
-function buildSource(w, h){
-  if (src.width !== w || src.height !== h){ src.width = w; src.height = h; }
+/* w,h are the ORIGINAL (upright) dimensions; when transposed the
+   source canvas becomes h×w with the image rotated 90° so the
+   effects — which always cut along x — end up cutting horizontally. */
+function buildSource(w, h, transposed){
+  const sw = transposed ? h : w, sh = transposed ? w : h;
+  if (src.width !== sw || src.height !== sh){ src.width = sw; src.height = sh; }
+  sctx.setTransform(1,0,0,1,0,0);
+  sctx.clearRect(0, 0, sw, sh);
   sctx.filter =
     (S.mono ? "grayscale(1) " : "") +
     `contrast(${S.contrast}%) brightness(${S.bright}%)`;
+  if (transposed){
+    sctx.translate(h, 0);
+    sctx.rotate(Math.PI / 2);
+  }
   sctx.drawImage(S.img, 0, 0, w, h);
   sctx.filter = "none";
+  sctx.setTransform(1,0,0,1,0,0);
 }
 
 /* ---------- effects ----------
@@ -400,21 +416,43 @@ const FX = { slice: fxSlice, mirror: fxMirror, echo: fxEcho,
              weave: fxWeave, mosaic: fxMosaic, bars: fxBars };
 
 /* ---------- render ---------- */
+const work = document.createElement("canvas");   // effect canvas for horizontal mode
+
 function render(target, scaleCap, t = null){
   if (!S.img) return;
   const iw = S.img.naturalWidth, ih = S.img.naturalHeight;
   const cap = scaleCap || 1400;
   const k = Math.min(1, cap / Math.max(iw, ih));
   const W = Math.round(iw * k), H = Math.round(ih * k);
-  buildSource(W, H);
+  const horiz = S.axis === "h";
+  buildSource(W, H, horiz);
+
   const c = target || view;
   if (c.width !== W || c.height !== H){ c.width = W; c.height = H; }
   const ctx = c.getContext("2d");
   ctx.setTransform(1,0,0,1,0,0);
-  ctx.fillStyle = S.bg;
-  ctx.fillRect(0, 0, W, H);
   ctx.imageSmoothingQuality = "high";
-  FX[S.effect](ctx, W, H, rng(S.seed), S, t);
+
+  if (!horiz){
+    ctx.fillStyle = S.bg;
+    ctx.fillRect(0, 0, W, H);
+    FX[S.effect](ctx, W, H, rng(S.seed), S, t);
+    return;
+  }
+
+  // run the effect in transposed space (H×W), then rotate back upright
+  if (work.width !== H || work.height !== W){ work.width = H; work.height = W; }
+  const wx = work.getContext("2d");
+  wx.setTransform(1,0,0,1,0,0);
+  wx.fillStyle = S.bg;
+  wx.fillRect(0, 0, H, W);
+  wx.imageSmoothingQuality = "high";
+  FX[S.effect](wx, H, W, rng(S.seed), S, t);
+
+  ctx.translate(0, H);
+  ctx.rotate(-Math.PI / 2);
+  ctx.drawImage(work, 0, 0);
+  ctx.setTransform(1,0,0,1,0,0);
 }
 
 /* ---------- animation loop ---------- */
@@ -482,6 +520,15 @@ document.getElementById("chips").addEventListener("click", e => {
   document.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
   b.classList.add("on");
   S.effect = b.dataset.e;
+  if (!S.playing) render();
+});
+
+document.getElementById("axis").addEventListener("click", e => {
+  const b = e.target.closest(".chip");
+  if (!b) return;
+  document.querySelectorAll("#axis .chip").forEach(c => c.classList.remove("on"));
+  b.classList.add("on");
+  S.axis = b.dataset.a;
   if (!S.playing) render();
 });
 
