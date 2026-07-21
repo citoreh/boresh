@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boresh — sliced portrait studio</title>
+<style>
+  :root{
+    --bg:#141416;
+    --panel:#1d1e21;
+    --line:#2c2d31;
+    --paper:#ece8df;
+    --ink:#e8e6e0;
+    --dim:#8b8a86;
+    --cut:#e34a27; /* craft-knife red */
+    --mono:"SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:var(--mono); font-size:12px;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  header{
+    display:flex; align-items:baseline; gap:14px;
+    padding:14px 20px 10px; border-bottom:1px solid var(--line);
+    flex:0 0 auto;
+  }
+  .logo{font-size:22px; font-weight:800; letter-spacing:.06em; display:inline-flex;}
+  .logo span{display:inline-block;}
+  .logo .up{transform:translateY(-3px); color:var(--cut);}
+  .logo .dn{transform:translateY(3px);}
+  .fa{color:var(--dim); font-size:14px;}
+  .tag{margin-left:auto; color:var(--dim); letter-spacing:.08em; text-transform:uppercase; font-size:10px;}
+
+  main{flex:1; display:flex; min-height:0;}
+
+  /* stage */
+  .stage{
+    flex:1; display:flex; align-items:center; justify-content:center;
+    padding:26px; min-width:0; position:relative;
+  }
+  .stage.dragover::after{
+    content:"drop image"; position:absolute; inset:14px;
+    border:1px dashed var(--cut); color:var(--cut);
+    display:flex; align-items:center; justify-content:center;
+    letter-spacing:.2em; text-transform:uppercase;
+  }
+  #view{
+    max-width:100%; max-height:100%;
+    box-shadow:0 14px 50px rgba(0,0,0,.55);
+    background:var(--paper);
+  }
+  .empty{
+    border:1px dashed var(--line); color:var(--dim);
+    padding:60px 70px; text-align:center; cursor:pointer; line-height:2;
+    letter-spacing:.08em; text-transform:uppercase;
+  }
+  .empty b{color:var(--ink);}
+
+  /* rail */
+  aside{
+    flex:0 0 292px; border-left:1px solid var(--line);
+    background:var(--panel); overflow-y:auto; padding-bottom:20px;
+  }
+  .sec{padding:14px 16px; border-bottom:1px solid var(--line);}
+  .sec h2{
+    font-size:10px; letter-spacing:.22em; text-transform:uppercase;
+    color:var(--dim); margin-bottom:12px; font-weight:400;
+  }
+  .chips{display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px;}
+  .chip{
+    border:1px solid var(--line); background:transparent; color:var(--ink);
+    padding:8px 0; font-family:var(--mono); font-size:11px; cursor:pointer;
+    letter-spacing:.04em;
+  }
+  .chip:hover{border-color:var(--dim);}
+  .chip.on{border-color:var(--cut); color:var(--cut);}
+  .row{display:flex; align-items:center; gap:10px; margin-bottom:11px;}
+  .row:last-child{margin-bottom:0;}
+  .row label{flex:0 0 84px; color:var(--dim); font-size:11px;}
+  .row output{flex:0 0 36px; text-align:right; font-size:11px;}
+  input[type=range]{
+    flex:1; -webkit-appearance:none; appearance:none; height:2px;
+    background:var(--line); outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; appearance:none; width:11px; height:11px;
+    background:var(--ink); border-radius:0; cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-thumb:hover{background:var(--cut);}
+  input[type=range]:focus-visible::-webkit-slider-thumb{background:var(--cut);}
+  input[type=color]{
+    width:26px; height:20px; border:1px solid var(--line); background:none;
+    padding:0; cursor:pointer;
+  }
+  .tog{
+    display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none;
+    color:var(--dim); font-size:11px;
+  }
+  .tog input{accent-color:var(--cut);}
+  .btns{display:flex; gap:8px;}
+  button.act{
+    flex:1; padding:10px 0; font-family:var(--mono); font-size:11px;
+    letter-spacing:.14em; text-transform:uppercase; cursor:pointer;
+    border:1px solid var(--line); background:transparent; color:var(--ink);
+  }
+  button.act:hover{border-color:var(--dim);}
+  button.primary{border-color:var(--cut); color:var(--cut);}
+  button.primary:hover{background:var(--cut); color:#141416;}
+  #file{display:none;}
+  .hint{color:var(--dim); font-size:10px; line-height:1.7; margin-top:8px;}
+  @media (max-width:760px){
+    main{flex-direction:column; overflow-y:auto;}
+    aside{flex:none; border-left:none; border-top:1px solid var(--line);}
+    body{overflow:auto;}
+    .stage{min-height:52vh;}
+  }
+  @media (prefers-reduced-motion:no-preference){
+    .logo .up,.logo .dn{transition:transform .3s;}
+    .logo:hover .up{transform:translateY(-5px);}
+    .logo:hover .dn{transform:translateY(5px);}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo" aria-label="Boresh">
+    <span>B</span><span class="up">O</span><span class="dn">R</span><span>E</span><span class="up">S</span><span class="dn">H</span>
+  </div>
+  <div class="fa">برش</div>
+  <div class="tag">sliced portrait studio</div>
+</header>
+
+<main>
+  <div class="stage" id="stage">
+    <div class="empty" id="empty">
+      <b>click</b> or <b>drop</b> a portrait here<br>
+      everything runs locally — nothing is uploaded
+    </div>
+    <canvas id="view" hidden></canvas>
+  </div>
+
+  <aside>
+    <div class="sec">
+      <h2>Source</h2>
+      <div class="btns">
+        <button class="act" id="loadBtn">Load image</button>
+      </div>
+      <input type="file" id="file" accept="image/*">
+    </div>
+
+    <div class="sec">
+      <h2>Cut</h2>
+      <div class="chips" id="chips">
+        <button class="chip on" data-e="slice">Slice</button>
+        <button class="chip" data-e="mirror">Mirror</button>
+        <button class="chip" data-e="echo">Echo</button>
+        <button class="chip" data-e="weave">Weave</button>
+        <button class="chip" data-e="mosaic">Mosaic</button>
+        <button class="chip" data-e="bars">Bars</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>Geometry</h2>
+      <div class="row"><label for="count">strips</label><input type="range" id="count" min="6" max="120" value="28"><output id="countV">28</output></div>
+      <div class="row"><label for="shift">shift</label><input type="range" id="shift" min="0" max="100" value="30"><output id="shiftV">30</output></div>
+      <div class="row"><label for="gap">gap</label><input type="range" id="gap" min="0" max="60" value="12"><output id="gapV">12</output></div>
+      <div class="row"><label for="jitter">jitter</label><input type="range" id="jitter" min="0" max="100" value="35"><output id="jitterV">35</output></div>
+    </div>
+
+    <div class="sec">
+      <h2>Tone</h2>
+      <div class="row"><label for="contrast">contrast</label><input type="range" id="contrast" min="60" max="200" value="115"><output id="contrastV">115</output></div>
+      <div class="row"><label for="bright">brightness</label><input type="range" id="bright" min="60" max="160" value="102"><output id="brightV">102</output></div>
+      <div class="row">
+        <label class="tog" style="flex:1"><input type="checkbox" id="mono" checked> black &amp; white</label>
+        <input type="color" id="bgcol" value="#ece8df" title="paper colour">
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>Print</h2>
+      <div class="btns">
+        <button class="act" id="recut">Re-cut</button>
+        <button class="act primary" id="save">Export PNG</button>
+      </div>
+      <div class="hint">Re-cut reshuffles the random pattern. Export renders at full source resolution.</div>
+    </div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+
+/* ---------- state ---------- */
+const S = {
+  img: null,
+  effect: "slice",
+  seed: 1234,
+  count: 28, shift: 30, gap: 12, jitter: 35,
+  contrast: 115, bright: 102, mono: true, bg: "#ece8df",
+};
+
+const view = document.getElementById("view");
+const vctx = view.getContext("2d");
+const src = document.createElement("canvas");   // toned source
+const sctx = src.getContext("2d");
+
+/* seeded rng (mulberry32) */
+function rng(seed){
+  let a = seed >>> 0;
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+/* ---------- tone pass ---------- */
+function buildSource(w, h){
+  src.width = w; src.height = h;
+  sctx.filter =
+    (S.mono ? "grayscale(1) " : "") +
+    `contrast(${S.contrast}%) brightness(${S.bright}%)`;
+  sctx.drawImage(S.img, 0, 0, w, h);
+  sctx.filter = "none";
+}
+
+/* ---------- effects ----------
+   each: (ctx, W, H, r, p) — draws from `src` (already W×H) */
+
+function fxSlice(ctx, W, H, r, p){
+  const n = p.count, w = W / n;
+  const maxDy = p.shift / 100 * H * 0.28;
+  const g = p.gap / 100 * w * 0.9;
+  for (let i = 0; i < n; i++){
+    const dy = (r() - 0.5) * 2 * maxDy * (0.4 + 0.6 * r());
+    const sx = i * w;
+    ctx.drawImage(src, sx, 0, w, H, sx + g/2, dy, w - g, H);
+  }
+}
+
+function fxMirror(ctx, W, H, r, p){
+  const n = p.count, w = W / n;
+  const maxDy = p.shift / 100 * H * 0.15;
+  const g = p.gap / 100 * w * 0.9;
+  const prob = 0.25 + p.jitter / 100 * 0.5;
+  for (let i = 0; i < n; i++){
+    const dx = i * w + g/2, dw = w - g;
+    const dy = (r() - 0.5) * 2 * maxDy;
+    if (r() < prob){
+      // sample the horizontally mirrored position, drawn flipped
+      const sx = W - (i + 1) * w;
+      ctx.save();
+      ctx.translate(dx + dw, 0); ctx.scale(-1, 1);
+      ctx.drawImage(src, sx, 0, w, H, 0, dy, dw, H);
+      ctx.restore();
+    } else {
+      ctx.drawImage(src, i * w, 0, w, H, dx, dy, dw, H);
+    }
+  }
+}
+
+function fxEcho(ctx, W, H, r, p){
+  const n = p.count, w = W / n;
+  const maxDy = p.shift / 100 * H * 0.18;
+  const g = p.gap / 100 * w * 0.9;
+  const jx = p.jitter / 100 * W * 0.22;   // horizontal source displacement
+  for (let i = 0; i < n; i++){
+    let sx = i * w + (r() - 0.5) * 2 * jx;
+    sx = Math.max(0, Math.min(W - w, sx));
+    const dy = (r() - 0.5) * 2 * maxDy;
+    ctx.drawImage(src, sx, 0, w, H, i * w + g/2, dy, w - g, H);
+  }
+}
+
+function fxWeave(ctx, W, H, r, p){
+  const n = Math.max(6, Math.round(p.count * 0.8));
+  const cw = W / n, rh = cw;                 // square-ish cells
+  const rows = Math.ceil(H / rh);
+  const g = p.gap / 100 * cw * 0.5;
+  const j = p.jitter / 100 * cw * 0.25;
+  // second layer: flipped source
+  const b = document.createElement("canvas");
+  b.width = W; b.height = H;
+  const bx = b.getContext("2d");
+  bx.translate(W, 0); bx.scale(-1, 1);
+  bx.drawImage(src, 0, 0);
+  for (let row = 0; row < rows; row++){
+    for (let col = 0; col < n; col++){
+      const over = (row + col) % 2 === 0;
+      const layer = over ? src : b;
+      const x = col * cw, y = row * rh;
+      const dx = (r() - 0.5) * 2 * j, dy = (r() - 0.5) * 2 * j;
+      ctx.drawImage(layer, x, y, cw, rh, x + dx + g/2, y + dy + g/2, cw - g, rh - g);
+      // paper-strip shading: darken the "under" cells slightly
+      if (!over){
+        ctx.fillStyle = "rgba(0,0,0,0.10)";
+        ctx.fillRect(x + dx + g/2, y + dy + g/2, cw - g, rh - g);
+      }
+    }
+  }
+}
+
+function fxMosaic(ctx, W, H, r, p){
+  const n = Math.max(8, Math.round(p.count * 0.9));
+  const t = W / n;
+  const rows = Math.ceil(H / t);
+  const g = p.gap / 100 * t * 0.7;
+  const j = p.jitter / 100 * t * 0.5;
+  const rot = p.shift / 100 * 0.16;          // radians max
+  for (let row = 0; row < rows; row++){
+    for (let col = 0; col < n; col++){
+      const x = col * t, y = row * t;
+      const cx = x + t/2 + (r() - 0.5) * 2 * j;
+      const cy = y + t/2 + (r() - 0.5) * 2 * j;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate((r() - 0.5) * 2 * rot);
+      ctx.drawImage(src, x, y, t, t, -t/2 + g/2, -t/2 + g/2, t - g, t - g);
+      ctx.restore();
+    }
+  }
+}
+
+function fxBars(ctx, W, H, r, p){
+  const n = p.count;
+  const baseW = W / n;
+  const maxDy = p.shift / 100 * H * 0.35;
+  const gapPx = p.gap / 100 * baseW * 1.4;
+  const skipProb = p.jitter / 100 * 0.35;
+  ctx.shadowColor = "rgba(0,0,0,0.35)";
+  ctx.shadowBlur = baseW * 0.35;
+  ctx.shadowOffsetY = baseW * 0.12;
+  let x = 0;
+  while (x < W){
+    const w = baseW * (0.5 + r());
+    if (r() > skipProb){
+      const dy = (r() - 0.5) * 2 * maxDy;
+      const sh = H * (0.75 + r() * 0.25);   // some bars shorter
+      const sy = (H - sh) * r();
+      ctx.drawImage(src, x, sy, w, sh, x, sy + dy, w, sh);
+    }
+    x += w + gapPx * r();
+  }
+  ctx.shadowColor = "transparent";
+}
+
+const FX = { slice: fxSlice, mirror: fxMirror, echo: fxEcho,
+             weave: fxWeave, mosaic: fxMosaic, bars: fxBars };
+
+/* ---------- render ---------- */
+function render(target, scaleCap){
+  if (!S.img) return;
+  const iw = S.img.naturalWidth, ih = S.img.naturalHeight;
+  const cap = scaleCap || 1400;
+  const k = Math.min(1, cap / Math.max(iw, ih));
+  const W = Math.round(iw * k), H = Math.round(ih * k);
+  buildSource(W, H);
+  const c = target || view;
+  c.width = W; c.height = H;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = S.bg;
+  ctx.fillRect(0, 0, W, H);
+  ctx.imageSmoothingQuality = "high";
+  FX[S.effect](ctx, W, H, rng(S.seed), S);
+}
+
+/* ---------- io ---------- */
+const stage = document.getElementById("stage");
+const empty = document.getElementById("empty");
+const file  = document.getElementById("file");
+
+function loadFile(f){
+  if (!f || !f.type.startsWith("image/")) return;
+  const url = URL.createObjectURL(f);
+  const img = new Image();
+  img.onload = () => {
+    S.img = img;
+    empty.hidden = true;
+    view.hidden = false;
+    render();
+    URL.revokeObjectURL(url);
+  };
+  img.src = url;
+}
+
+empty.addEventListener("click", () => file.click());
+document.getElementById("loadBtn").addEventListener("click", () => file.click());
+file.addEventListener("change", e => loadFile(e.target.files[0]));
+
+["dragenter","dragover"].forEach(ev => stage.addEventListener(ev, e => {
+  e.preventDefault(); stage.classList.add("dragover");
+}));
+["dragleave","drop"].forEach(ev => stage.addEventListener(ev, e => {
+  e.preventDefault(); stage.classList.remove("dragover");
+}));
+stage.addEventListener("drop", e => loadFile(e.dataTransfer.files[0]));
+
+/* ---------- controls ---------- */
+document.getElementById("chips").addEventListener("click", e => {
+  const b = e.target.closest(".chip");
+  if (!b) return;
+  document.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
+  b.classList.add("on");
+  S.effect = b.dataset.e;
+  render();
+});
+
+function bindRange(id, key){
+  const el = document.getElementById(id);
+  const out = document.getElementById(id + "V");
+  el.addEventListener("input", () => {
+    S[key] = +el.value;
+    out.textContent = el.value;
+    render();
+  });
+}
+bindRange("count","count"); bindRange("shift","shift");
+bindRange("gap","gap");     bindRange("jitter","jitter");
+bindRange("contrast","contrast"); bindRange("bright","bright");
+
+document.getElementById("mono").addEventListener("change", e => {
+  S.mono = e.target.checked; render();
+});
+document.getElementById("bgcol").addEventListener("input", e => {
+  S.bg = e.target.value; render();
+});
+document.getElementById("recut").addEventListener("click", () => {
+  S.seed = (Math.random() * 1e9) | 0; render();
+});
+document.getElementById("save").addEventListener("click", () => {
+  if (!S.img) return;
+  const out = document.createElement("canvas");
+  render(out, Math.max(S.img.naturalWidth, S.img.naturalHeight)); // full res
+  const a = document.createElement("a");
+  a.download = `boresh-${S.effect}-${S.seed}.png`;
+  a.href = out.toDataURL("image/png");
+  a.click();
+  render(); // restore preview
+});
+</script>
+</body>
+</html>
